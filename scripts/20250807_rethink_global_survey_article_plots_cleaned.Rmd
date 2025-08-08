@@ -1,0 +1,2045 @@
+---
+title: "Global insights into extracellular polymeric substances from activated sludge Yield, composition, and microbial communities"
+author: "Marie Riisgaard-Jensen"
+date: "August 2025" 
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    css: rmarkdown_presentation/markdown_files/xaringan-themer.css
+---
+
+# Setup 
+
+```{r setup, include=FALSE}
+# Load necessary libraries and configure options if needed
+knitr::opts_chunk$set(
+  #fig.width=9, fig.height=3.5, 
+  fig.retina=3,
+  out.width = "100%",
+  cache = FALSE,
+  echo = FALSE,
+  message = FALSE, 
+  warning = FALSE,
+  hiline = TRUE,
+  error = FALSE
+)
+
+# Packages
+pacman::p_load(tidyverse, 
+               openxlsx,
+               ampvis2, 
+               ggtext,
+               lubridate, 
+               knitr, 
+               tidyverse, 
+               kableExtra,
+               patchwork, 
+               gridExtra, 
+               ggrepel, 
+               ggtreeExtra, 
+               ggtree,
+               phyloseq, 
+               ggstar,
+               treeio, 
+               tidytree, 
+               ggnewscale, 
+               TDbook, 
+               pairwiseAdonis)
+
+
+# pacman::p_install_gh("kasperskytte/ampvis2")
+# pacman::p_install_gh("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+
+# Load  data 
+WD = "C:/Users/HD95LP/OneDrive - Aalborg Universitet/visual_studio_code/2025_Global_insights_into_EPS_from_AS/"
+setwd(WD)
+
+# Paths
+OutputPath = paste0(WD, "output/")
+
+
+```
+
+
+# Description of Dataset
+
+This script processes data generated using **V1–V8 16S rRNA amplicons** and the Nanopore 16S online control pipeline:  
+👉 [cmc-aau/nanopore_16Samp](https://github.com/cmc-aau/nanopore_16Samp/tree/main)
+
+The original pipeline is optimized for the **V1–V3 region**, with a default minimum alignment length of **300 bp**.  
+However, since the V1–V8 amplicons have an average read length of approximately **1300 bp**, this version of the pipeline has been modified to use a **minimum alignment length of 800 bp** to better reflect full-length amplicon data.
+
+
+**Taxonomic Classification**
+
+For taxonomic classification, the **MiDAS 5.3** database was used. The data has been processed using two different identity cutoffs:
+
+- **94.5% identity**: Genus-level classification  
+- **86.5% identity**: Family-level classification  
+- **82% identity**: Order-level classification
+
+These thresholds are supported by existing literature:
+
+- Yarza P et al., *Nature Reviews Microbiology* (2014); 12:635–645. [https://doi.org/10.1038/nrmicro3330](https://doi.org/10.1038/nrmicro3330)  
+- Dueholm MKD et al., *mBio* (2020); 11:e01557-20. [https://doi.org/10.1128/mBio.01557-20](https://doi.org/10.1128/mBio.01557-20)
+
+
+# Load Data
+
+## Functions
+
+Import functions 
+
+```{r}
+
+# Load functions 
+source(paste0(WD, "scripts/functions/server_files_to_ampvis.R"))  # works for all nanopore generated ampvis (2023-10-31)
+source(paste0(WD, "scripts/functions/PCOA_from_long_data.R"))
+source(paste0(WD, "scripts/functions/ADONIS_from_long_data.R"))
+source(paste0(WD, "scripts/functions/PCOA_from_long_data_get_matrix.R"))
+source(paste0(WD, "scripts/functions/tidy_long_function_nanopore_version.R"))
+
+
+# Define a function to merge multiple datasets and metadata
+merge_amp_datasets <- function(datasets, combined_metadata) {
+  
+  # Combine metadata from all datasets with error-checking
+  metadata_list <- lapply(datasets, function(dataset) dataset$metadata)
+  
+  # Start with the first dataset as the base for merging
+  merged_data <- amp_load(
+    otutable = datasets[[1]]$abund, 
+    taxonomy = datasets[[1]]$tax, 
+    metadata = combined_metadata
+  )
+  
+  # Loop over the rest of the datasets and merge them with the base
+  for (i in 2:length(datasets)) {
+    merged_data <- amp_merge_ampvis2(
+      merged_data,
+      amp_load(
+        otutable = datasets[[i]]$abund, 
+        taxonomy = datasets[[i]]$tax, 
+        metadata = combined_metadata
+      ),
+      by_refseq = FALSE
+    )
+  }
+  
+  return(merged_data)
+}
+
+
+```
+
+
+## Load ampvis objects
+
+Use the `server_files_to_ampvis` function to load the following:
+
+- **Ampvis object with normalized reads**  
+  (Normalization accounts for non-classified reads)
+
+- **Ampvis object with raw read counts**  
+  (Unclassified reads are not included)
+
+
+```{r load v18 data, include=FALSE}
+
+#######################
+### 2401p1 - 2024-01-Rethink-metadata2 ######
+######################
+
+run_id = "2401p1"
+
+cut_off = "ID_82"
+list <- server_files_to_ampvis(
+  DataPath = paste0(WD, "data/amplicon_data/"),
+  metadata_file_name = "2024-01-Rethink-metadata2.xlsx",
+  folder = "2024-01_Rethink_82/",
+  ID_col = "SampleID", 
+  append_barcode = paste0(run_id, "_", cut_off),
+  total_reads_file_name = "summary"
+)
+d_norm_2401p1_ID_82 <- list[[1]] 
+d_raw_2401p1_ID_82 <- list[[2]]
+#unclassified_RE_24_FEB_v18_v2 <- list[[3]]
+rm(list)
+
+
+cut_off = "ID_865"
+list <- server_files_to_ampvis(
+  DataPath = paste0(WD, "data/amplicon_data/"),
+  metadata_file_name = "2024-01-Rethink-metadata2.xlsx",
+  folder = "2024-01_Rethink_865/",
+  ID_col = "SampleID", 
+  append_barcode = paste0(run_id, "_", cut_off),
+  total_reads_file_name = "summary"
+)
+d_norm_2401p1_ID_865 <- list[[1]] 
+d_raw_2401p1_ID_865 <- list[[2]]
+#unclassified_RE_24_FEB_v18_v2 <- list[[3]]
+rm(list)
+
+
+cut_off = "ID_945"
+list <- server_files_to_ampvis(
+  DataPath = paste0(WD, "data/amplicon_data/"),
+  metadata_file_name = "2024-01-Rethink-metadata2.xlsx",
+  folder = "2024-01_Rethink_945/",
+  ID_col = "SampleID", 
+  append_barcode = paste0(run_id, "_", cut_off),
+  total_reads_file_name = "summary"
+)
+d_norm_2401p1_ID_945 <- list[[1]] 
+d_raw_2401p1_ID_945 <- list[[2]]
+#unclassified_RE_24_FEB_v18_v2 <- list[[3]]
+rm(list)
+
+
+#######################
+### 2401p3 ######
+######################
+
+run_id = "2401p3"
+
+cut_off = "ID_82"
+list <- server_files_to_ampvis(
+  DataPath = paste0(WD, "data/amplicon_data/"),
+  metadata_file_name = "2024-01-p3_metadata2.xlsx",
+  folder = "2024-01_p3_82/",
+  ID_col = "SampleID", 
+  append_barcode = paste0(run_id, "_", cut_off),
+  total_reads_file_name = "summary"
+)
+d_norm_2401p3_ID_82 <- list[[1]] 
+d_raw_2401p3_ID_82 <- list[[2]]
+#unclassified_RE_24_FEB_v18_v2 <- list[[3]]
+rm(list)
+
+
+cut_off = "ID_865"
+list <- server_files_to_ampvis(
+  DataPath = paste0(WD, "data/amplicon_data/"),
+  metadata_file_name = "2024-01-p3_metadata2.xlsx",
+  folder = "2024-01_p3_865/",
+  ID_col = "SampleID", 
+  append_barcode = paste0(run_id, "_", cut_off),
+  total_reads_file_name = "summary"
+)
+d_norm_2401p3_ID_865 <- list[[1]] 
+d_raw_2401p3_ID_865 <- list[[2]]
+#unclassified_RE_24_FEB_v18_v2 <- list[[3]]
+rm(list)
+
+cut_off = "ID_945"
+list <- server_files_to_ampvis(
+  DataPath = paste0(WD, "data/amplicon_data/"),
+  metadata_file_name = "2024-01-p3_metadata2.xlsx",
+  folder = "2024-01_p3_945/",
+  ID_col = "SampleID", 
+  append_barcode = paste0(run_id, "_", cut_off),
+  total_reads_file_name = "summary"
+)
+d_norm_2401p3_ID_945 <- list[[1]] 
+d_raw_2401p3_ID_945 <- list[[2]]
+#unclassified_RE_24_FEB_v18_v2 <- list[[3]]
+rm(list)
+
+
+
+```
+
+
+### Fix metadata
+
+
+```{r}
+check_metadata <- function(metadata){
+  #metadata = d_norm_2401p1_ID_945$metadata
+  metadata_var <- metadata %>% 
+    select(SampleID, Barcode, PlantID,
+             Date,SampleName,Primer, ProjectName, 
+             SampleContent, Comment, total_reads, LibID) %>%
+    mutate(Details = SampleID) %>% 
+    separate(Details, into = c("metadata_id","rm", "identy_cutoff", "rm2")) %>% 
+    select(-rm, -rm2) %>% 
+    mutate(
+      SampleName = case_when(
+        metadata_id %in% c("2401p1", "2401p3") & ProjectName == "MIDAS4" ~ 
+          gsub("(MIDAS4_[A-Z]{2})-([0-9]+)(_.)", "\\1_MWWTP\\2_XX\\3", SampleName), 
+        metadata_id %in% c("2505p2") & ProjectName == "rethink" ~ 
+          paste0("RETHINK_", "DK_",str_remove(SampleName, "_RAS")),
+        .default = SampleName),
+      ProjectName = case_when(
+        ProjectName == "REThiNK" ~ "RETHINK", 
+        ProjectName == "rethink" ~ "RETHINK", 
+        .default = ProjectName),
+      SampleName = case_when(
+        metadata_id %in% c("2401p3") & str_detect(SampleName, "_XX_") ~ 
+          paste0("RETHINK_", SampleName), 
+        metadata_id %in% c("2405p2") & str_detect(SampleName, "_B") ~ 
+          paste0("RETHINK_", SampleName), 
+        SampleID %in%c ("2401p3_ID_82_barcode80", "2401p3_ID_94_barcode80", "2401p3_ID_865_barcode80") ~
+          str_replace(SampleName, "HOMO", "C"),
+        .default = SampleName),
+      PlantID = case_when(metadata_id %in% c("2404p3") & Barcode == "barcode55" ~ "PCRPOS", 
+                          metadata_id %in% c("2405p2") & str_detect(PlantID, "PCRPOS") ~ "PCRPOS",
+                          .default = PlantID), 
+      SampleContent = case_when(
+        ProjectName == "RETHINK" & SampleContent == "AS" ~ "RAS", 
+        str_detect(LibID, "POS") ~ "PCRPOS", 
+        str_detect(LibID, "NEG") ~ "PCRNEG", 
+        .default = SampleContent)
+      ) %>% 
+    separate(SampleName, 
+             into = c("rm1","country_code", "WWTP_ID", 
+                      "rm2", "technical_replicate", "volume_test"),
+           sep = "_") %>% 
+    mutate(Date = as.Date(Date, format = "%d-%m-%Y"), 
+           identy_cutoff = ifelse(
+             nchar(sub(".*ID_(\\d+).*", "\\1", SampleID)) == 3,
+             as.numeric(sub(".*ID_(\\d+).*", "\\1", SampleID)) / 1000, # For 3 digits, divide by 1000
+             as.numeric(sub(".*ID_(\\d+).*", "\\1", SampleID)) / 100     # For 2 digits, divide by 100
+             )
+           ) %>% 
+    select(-rm1, -rm2)
+  
+  metadata_var
+}
+
+merged_metadata <- rbind(
+  check_metadata(d_norm_2401p1_ID_945$metadata),
+  check_metadata(d_norm_2401p1_ID_82$metadata),
+  check_metadata(d_norm_2401p1_ID_865$metadata), 
+  #
+  check_metadata(d_norm_2401p3_ID_865$metadata), 
+  check_metadata(d_norm_2401p3_ID_945$metadata), 
+  check_metadata(d_norm_2401p3_ID_82$metadata)
+  ) %>% 
+  tibble()
+
+
+
+new_id <- 
+  merged_metadata %>% 
+  filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  filter(!WWTP_ID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  filter(ProjectName != "MIDAS4") %>% 
+  distinct(country_code, WWTP_ID) %>% #print(n=100)
+  group_by(country_code) %>% 
+  mutate(
+    no_p_in_co = n_distinct(WWTP_ID)) %>% 
+  group_by(country_code) %>%
+  arrange(country_code, WWTP_ID) %>% 
+  mutate(
+    let = row_number(),
+    let = factor(let, 
+                 levels = c(1, 2, 3),
+                 labels = c("A", "B", "C")),
+    WWTP_ID2 = if_else(no_p_in_co > 1, 
+                       paste0(country_code,"(", let, ")"), 
+                       country_code)
+    ) %>% distinct(WWTP_ID, WWTP_ID2, let, no_p_in_co) %>% 
+  ungroup() %>% 
+  select(WWTP_ID, WWTP_ID2, -let, -no_p_in_co)
+  
+merged_metadata <- 
+  merged_metadata %>% 
+  left_join(new_id, relationship = "many-to-many") %>% 
+  filter(!str_detect(ProjectName, "MIDAS")) %>% 
+  filter(!str_detect(PlantID, "HOMO")) %>% 
+  filter(!is.na(Date)) %>% 
+  mutate(WWTP_ID2 = if_else(ProjectName == "MIDAS4" & 
+                                      !SampleContent %in% c("PCRPOS", "PCRNEG", "CTRL"), 
+                             paste0(country_code, " (MiDAS4)"), WWTP_ID2)
+  ) %>% 
+  arrange(Date) %>% 
+  distinct(WWTP_ID2, technical_replicate, identy_cutoff, .keep_all = T) 
+
+  
+
+```
+
+
+#### Manually check metadata 
+
+```{r, eval=FALSE}
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(Date) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n()) %>% arrange(desc(Date))
+print(check, n = 100)
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(identy_cutoff) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check, n = 100) 
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(WWTP_ID2) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check, n = 100) 
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(Date) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n()) %>% arrange(desc(Date))
+print(check, n = 100) 
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(Primer) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check) 
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(ProjectName) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check) 
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(SampleContent) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check) 
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(metadata_id) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check)
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(country_code) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check, n =100) 
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(WWTP_ID) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check, n = 100) 
+
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(technical_replicate) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check) 
+
+check <- merged_metadata %>% filter(!PlantID %in% c("PCRPOS", "PCRNEG", "CTRL")) %>% 
+  group_by(volume_test) %>% 
+  summarise(SampleIDs = paste0(SampleID, collapse = ";"),
+            n = n())
+print(check) 
+
+
+rm(check)
+
+
+```
+
+
+## Load additional plant and sample metadata
+
+```{r, RETHINK metadata mess, include=FALSE}
+
+# Load metadata from EXCEL
+  ## Location: Merge using WWTP_ID
+metadata_WWTP_location <- readxl::read_xlsx("C:/Users/HD95LP/OneDrive - Aalborg Universitet/AAU REThiNk - rethink-general/Global sampling/Sampling list.xlsx", sheet = 2, skip = 2) %>% 
+  select(WWTP_ID, WWTP_no, WWTP_name, Latitude, Longitude)
+
+
+# Samples metadata
+  ## Merge using WWTP_ID AND SampleDate
+metadata_samples <- readxl::read_xlsx("C:/Users/HD95LP/OneDrive - Aalborg Universitet/AAU REThiNk - rethink-general/Global sampling/Sampling list.xlsx", 
+                                      sheet = 4, skip = 2) %>% 
+  separate(`ID (made manually)`, into = c("ProjectName","country_code", "WWTP_ID", "Date"), 
+           sep = "_") %>% 
+  select(WWTP_ID, SampleDate, Date,`SS_content_gSS/L`, 
+         Temperature_process_tank_C, `SVI_ml/g`) %>% 
+  rename( "SVI_ml_g"= `SVI_ml/g`,
+          "SS_content_gSS_L" = `SS_content_gSS/L`) %>% 
+  mutate(Date = as.Date(SampleDate),
+         Temperature_process_tank_C = as.numeric(Temperature_process_tank_C)
+         ) %>% select(-SampleDate) 
+
+#Combine metadata set 
+meta_combined <- 
+  full_join(merged_metadata, metadata_WWTP_location, by = join_by(WWTP_ID)
+            ) %>%
+  #select(-Date) %>% 
+  full_join(., metadata_samples,by = join_by(Date, WWTP_ID)
+            )
+
+# Make world info
+meta_combined <- meta_combined %>% 
+  mutate(
+    country_code_WWTP_ID = paste0(country_code, "; ", WWTP_ID),
+    Latitude = as.numeric(Latitude), 
+    Longitude = as.numeric(Longitude),
+    country = countrycode::countrycode(country_code, "iso2c", "country.name"),
+    continent = countrycode::countrycode(country_code, "iso2c", "continent"),
+    continent_code = case_when(continent == "Africa"~ "AF", 
+                               continent == "Americas" & country_code == "US" ~ "NA", 
+                               continent == "Americas" & country_code == "AR" ~ "SA", 
+                               continent == "Europe" ~ "EU",
+                               continent == "Oceania" ~ "OC", 
+                               continent == "Asia" ~ "AS", .default = NA),
+    rndCoord.lat = kgc::RoundCoordinates(Latitude), 
+    rndCoord.lon = kgc::RoundCoordinates(Longitude), 
+    Temperature_process_tank_C = as.numeric(Temperature_process_tank_C), 
+    continent_country_code_WWTP_ID = paste0(continent_code, ";", country_code, ";", WWTP_ID),
+  )
+
+missing_samples <- meta_combined %>% filter(is.na(SampleID))
+
+metadata <- meta_combined %>% 
+  filter(!is.na(SampleID)) %>% 
+  ungroup()
+  
+rm(metadata_WWTP_location, metadata_samples, meta_combined, missing_samples, merged_metadata)
+
+
+# Climate zones
+WD_physical = "C:/Users/HD95LP/OneDrive - Aalborg Universitet/visual_studio_code/data_physical/climate_zones/Map_KG-Global/"
+# Read raster files
+period='1986-2010'
+r <- raster::raster(paste0(WD_physical, 'KG_', period, '.grd', sep = ''))
+# Legend must correspond to all climate classes, insert placeholders
+r0 <- r[1:32]; r[1:32] <- seq(1,32,1)
+# Converts raster field to categorical data
+r <- raster::ratify(r)
+rat <- raster::levels(r)[[1]]
+# Legend is always drawn in alphabetic order
+rat$climate <- c('Af', 'Am', 'As', 'Aw', 'BSh', 'BSk', 'BWh', 'BWk', 'Cfa', 'Cfb','Cfc', 'Csa', 'Csb', 'Csc', 'Cwa','Cwb', 'Cwc', 'Dfa', 'Dfb', 'Dfc','Dfd', 'Dsa', 'Dsb', 'Dsc', 'Dsd','Dwa', 'Dwb', 'Dwc', 'Dwd', 'EF','ET', 'Ocean')
+
+indices <- sapply(1:nrow(metadata), function(i) {
+    cell_index <- raster::cellFromXY(r, c(metadata$Longitude[i], metadata$Latitude[i]))
+    return(cell_index)
+  })
+
+metadata <- metadata %>% 
+  mutate(ID = r[indices]) %>% 
+  left_join(rat) %>% select(-ID) %>% 
+  distinct()
+
+rm(WD_physical, period, r, r0, rat, indices, ID)
+
+```
+
+
+### Plot plant details 
+
+```{r Make  plant detail table, echo=FALSE, warning=FALSE}
+
+## WWTP design
+metadata_WWTP_design <- readxl::read_xlsx("C:/Users/HD95LP/OneDrive - Aalborg Universitet/AAU REThiNk - rethink-general/Global sampling/Sampling list.xlsx", sheet = 3, skip = 1)
+
+# Format the 'Value' column with scientific notation and six significant digits
+green = "#95CA63"
+red = "#E37A5E"
+
+table_df <- metadata_WWTP_design %>%
+  filter(WWTP_ID %in% unlist(metadata$WWTP_ID)) %>%   ## Only include plants that have been sequenced
+  select(-Plant_name, -Primary_settling_note) %>% 
+  inner_join(metadata %>% 
+               select(WWTP_ID, WWTP_ID2, climate, 
+                      SS_content_gSS_L, Temperature_process_tank_C, SVI_ml_g) %>% 
+               distinct(WWTP_ID2, .keep_all = T)) %>% 
+  mutate(
+    Country = WWTP_ID2, #if_else(no_p_in_co >1, paste0(Country, "(", let, ")"), Country),
+    country = row.names(.),
+    # C_removal = cell_spec(C_removal, "html" ,background_as_tile = T ,
+    #                       background = case_when(C_removal == "Yes"~ green, C_removal == "No"~ red, 
+    #                                              .default =  "#BBBBBB")), 
+    
+    `m3/day` = as.numeric(`m3/day`),
+    `m3/day` = formatdown::format_numbers(`m3/day`, 2, set_power = 3),
+    PE_treated_number = PE_treated, 
+    PE_treated =  formatdown::format_numbers(PE_treated, 2, set_power = 3),
+    `Municipal\r\nOrganic` = paste0(round(as.numeric(`Municipal\r\nOrganic`)*100)), 
+    `Industrial \r\nOrganic` = paste0(round(as.numeric(`Industrial \r\nOrganic`)*100)), 
+    `Industrial\r\nChemical` = paste0(round(as.numeric(`Industrial\r\nChemical`)*100)), 
+    Temp_range_min = paste0(Temp_range_min),
+    Temp_range_max = paste0(Temp_range_max), 
+    Temperature_process_tank_C = paste0(round(Temperature_process_tank_C, 0)), 
+    SRT = as.numeric(`Sludge_ret.\r\n(days)`),
+    SS_content_gSS_L = round(as.numeric(SS_content_gSS_L), 1),
+    `Sludge_ret.\r\n(days)` = paste0(`Sludge_ret.\r\n(days)`), 
+    continent = countrycode::countrycode(country_code, "iso2c", "continent"),
+    #SVI_ml_g = round(SVI_ml_g, )
+    ) %>% 
+  relocate(continent, .after = 1) %>% 
+  rename(
+    "ID" = "WWTP_no", 
+    "PE" = "PE_treated",
+    "Climate" = "climate",
+    "Daily Load [m<sup>3</sup>]" = "m3/day", 
+    "Cb" = "C_removal", 
+    "N" = "Nitrification",
+    "DN" = "Denitrification",
+    "C" = "P_removal\r\nChemical", 
+    "B" = "P_removal\r\nBio",
+    "SRT [d]"= "Sludge_ret.\r\n(days)", 
+    "Min." = "Temp_range_min",
+    "Max." = "Temp_range_max", 
+    "Organic [%]" = `Industrial \r\nOrganic`,
+    "Chemical [%]"= `Industrial\r\nChemical`, 
+    "Municipal [%]" = `Municipal\r\nOrganic`,
+    "SS [g/L]" = "SS_content_gSS_L",
+    "SVI [ml/g]" = "SVI_ml_g",
+    "Temp. [\u00B0C]" = "Temperature_process_tank_C"
+  ) %>%
+  mutate(
+    Cb = case_when(Cb == "Yes" ~ "+", Cb == "No" ~"-", .default = NA),
+    N = case_when(N == "Yes" ~"+", N == "No" ~"-", .default = NA),
+    DN = case_when(DN == "Yes" ~"+", DN == "No" ~"-", .default = NA),
+    C = case_when(C == "Yes" ~"+", C == "No" ~"-", .default = NA),
+    B = case_when(B == "Yes" ~"+", B == "No" ~"-", .default = NA),
+    Anammox = case_when(Anammox == "Side stream" ~"+*", Anammox == "No" ~"-", .default = NA),
+    `Primary\r\nsettling`=case_when(`Primary\r\nsettling` == "Yes" ~"+", `Primary\r\nsettling` == "No" ~"-", .default = NA )
+  ) %>% 
+  mutate(
+        `Primary\r\nsettling`=  cell_spec(`Primary\r\nsettling`, background = case_when(`Primary\r\nsettling` == "+"~ green, `Primary\r\nsettling` == "-"~ red, .default =  "#BBBBBB")),
+    Cb = cell_spec(Cb, background = case_when(Cb == "+"~ green, Cb == "-"~ red, .default =  "#BBBBBB")),
+    N = cell_spec(N, background = case_when(N == "+"~ green, N == "-"~ red, .default =  "#BBBBBB")),
+    DN = cell_spec(DN, background = case_when(DN == "+"~ green, DN == "-"~ red, .default =  "#BBBBBB")),
+    C = cell_spec(C, background = case_when(C == "+"~ green, C == "-"~ red, .default =  "#BBBBBB")),
+    B = cell_spec(B, background = case_when(B == "+"~ green, B == "-"~ red, .default =  "#BBBBBB")),
+     Anammox = cell_spec(Anammox, background = case_when(Anammox == "+*"~ green, Anammox == "-"~ red, .default =  "#BBBBBB")),
+  ) %>% 
+  rename("PS" = "Primary\r\nsettling") %>% 
+  relocate(PS, .before = C) %>% 
+  relocate(Climate, .before = "Daily Load [m<sup>3</sup>]") %>% 
+  select(-country, -ID) %>% 
+  arrange(continent, Country) %>% distinct() 
+
+
+
+
+#saveRDS(table_df, file = paste0(OutputPath, "table_df.RDS"))
+colors <- c(rep("#D57F5A",1 ), rep("#E2B97F",1 ), rep("#4C6B7D", 4), rep("#6F8D55", 8), rep("#A8A8A8", 2))
+colors <- c(
+  rep("#E08E74", 1),    # Soft orange
+  rep("#D9C37D", 1),    # Muted yellow
+  rep("#7F9BB4", 4),    # Soft blue-gray
+  rep("#8C9F70", 8),    # Muted olive green
+  rep("#B0B0B0", 2)     # Light gray
+)
+
+table <- table_df %>%   
+  select(-continent, -country_code, -PE_treated_number, -SRT,
+         -`SVI [ml/g]`,
+         -Min., -Max., -WWTP_ID, -WWTP_ID2
+         ) %>% 
+  kbl(format = "html", escape = F, 
+      ) %>%
+  column_spec(3, border_left = F, #extra_css = "border-color: #fff #fff #fff #AEB6BF;"
+              ) %>% 
+  column_spec(1, bold = T, background = colors) %>% 
+  kable_styling("striped", full_width = T,bootstrap_options = c("striped", "hover", "condensed") ) %>% 
+  add_header_above(c(" " = 8, "P-rem." = 2, " " = 2, #"Temperature" = 2, 
+                     " " = 1,"Industrial" = 2, " " = 2
+                     ), 
+                   font_size = "normal", line = T, align = "|c|", line_sep = 3, background = "transparent", border_left = "white") %>% 
+  add_header_above(c(" " = 2, "Plant size" = 2, "Plant Design" = 8, # "Process Parameters" = 3, 
+                     "Wastewater" = 3, "Sample measurements" = 2), 
+                   font_size = "larger", line = T, align = "|c|", line_sep = 5, border_left = "white", background = "transparent") %>%
+  row_spec(0, bold = TRUE, hline_after = T) #%>%  # Make the table header bold
+ 
+table
+
+save_kable(table, paste0(OutputPath, "table_temp.html"))
+
+
+# Make dataframe 
+process_type_df <- table_df %>%
+  mutate(process_type = case_when(
+    (str_detect(Cb, "\\+") & str_detect(N, "\\+") & !str_detect(Anammox, "\\+") &
+      str_detect(DN, "\\+") & str_detect(B, "\\+") & str_detect(C, "-")) ~ "Cb,N,DN,P(B)",
+    (str_detect(Cb, "\\+") & str_detect(N, "\\+") & 
+      str_detect(DN, "\\+") & str_detect(Anammox, "-") & !str_detect(Anammox, "\\+") &
+      str_detect(C, "\\+") & str_detect(B, "\\-")) ~ "Cb,N,DN,P(C)", 
+    (str_detect(Cb, "\\+") & str_detect(N, "\\+") & 
+      str_detect(DN, "\\+") & str_detect(Anammox, "\\+")) ~ "Cb,N,DN,P(A)", 
+    str_detect(Cb, "\\+") & str_detect(N, "\\+") & str_detect(DN, "\\+") & 
+      (str_detect(B, "-") & str_detect(C, "-")) & str_detect(Anammox, "-") ~ "Cb,N,DN",
+     str_detect(Cb, "\\+") & str_detect(N, "\\+") & str_detect(DN, "-") & 
+      (str_detect(B, "-") | str_detect(C, "-")) ~ "Cb,N",
+     str_detect(Cb, "\\+") & str_detect(N, "-") & str_detect(DN, "-") & 
+      (str_detect(B, "-") | str_detect(C, "-")) ~ "Cb",
+    .default = "Unknown"),
+    process_type = if_else(str_detect(process_type, "(A)") & Country !="AU(A)", "Cb,N,DN,P(C)", process_type),
+    process_type = if_else(str_detect(process_type, "(A)") & Country =="AU(A)", "Cb,N,DN,P(B)", process_type),
+    PS = case_when(
+      str_detect(PS, "\\+") ~ "+PS", 
+      str_detect(PS, "-") ~ "-PS", 
+      str_detect(process_type, "Unknown") ~"-",
+      .default = "-"
+      ), 
+    Municipal = as.numeric(str_remove(`Municipal [%]`, "%")),
+    `Chemical ` = as.numeric(str_remove(`Chemical [%]`, "%")),
+    Organic = as.numeric(str_remove(`Organic [%]`, "%")),
+    `SVI [ml/g]` = as.numeric(str_remove( `SVI [ml/g]`, ">")),
+
+    ) %>%
+  rename("WW_chemical" = "Chemical ",
+         "WW_municipal" = "Municipal",
+         "WW_organic" = "Organic",
+         "SVI" = "SVI [ml/g]" 
+         ) %>% 
+  inner_join(metadata %>% distinct(WWTP_ID, WWTP_ID2)) %>% 
+  select(Country, continent, PE_treated_number, 
+         WW_chemical,WW_organic, WW_municipal,SVI,
+         PS, SRT, WWTP_ID, WWTP_ID2, process_type) 
+
+process_type_df
+rm(green, red, table_df, metadata_WWTP_design, table)
+
+
+
+
+
+```
+
+
+
+## Load all metadata into final amp object
+
+```{r metadata, include=FALSE}
+
+#######################
+# Combine all metadata
+########################
+
+metadata_all <- metadata %>% left_join(process_type_df  %>% select(-Country))
+
+# List of datasets
+datasets_norm <- list(
+  d_norm_2401p1_ID_945, d_norm_2401p1_ID_865, d_norm_2401p1_ID_82,
+  d_norm_2401p3_ID_945, d_norm_2401p3_ID_865, d_norm_2401p3_ID_82
+  )
+# Call the function with the datasets
+d_norm <- merge_amp_datasets(datasets_norm, combined_metadata = metadata_all)
+
+
+datasets_raw <- list(
+ d_raw_2401p1_ID_945, d_raw_2401p1_ID_865, d_raw_2401p1_ID_82,
+  d_raw_2401p3_ID_945, d_raw_2401p3_ID_865, d_raw_2401p3_ID_82)
+d_raw <- merge_amp_datasets(datasets_raw, combined_metadata = metadata_all)
+
+
+
+rm(d_raw_2401p1_ID_945, d_raw_2401p1_ID_865, d_raw_2401p1_ID_82,
+  d_norm_2401p1_ID_945, d_norm_2401p1_ID_865, d_norm_2401p1_ID_82,
+   d_raw_2401p3_ID_945, d_raw_2401p3_ID_865, d_raw_2401p3_ID_82, 
+    d_norm_2401p3_ID_945, d_norm_2401p3_ID_865, d_norm_2401p3_ID_82,
+  datasets_norm, datasets_raw
+  )
+
+rm(new_id, cut_off, run_id, merge_amp_datasets, server_files_to_ampvis, metadata)
+
+```
+
+### Load data_long 
+
+```{r}
+
+data_long <-
+  tidy_nanopore_pipeline(d_norm, SampleID_column_name = "SampleID", 
+                         rarefied_to_n_read = NA)
+
+data_long <- data_long %>% select(SampleID, samples) %>% left_join(metadata_all, by = join_by(SampleID))
+
+
+rm(process_type_df)
+
+```
+
+---
+
+# QC
+
+## Number of reads 
+
+
+```{r}
+
+d_raw %>% 
+  amp_subset_samples(identy_cutoff == 0.945) 
+
+
+```
+
+
+## Unclassified broad overview
+
+```{r}
+
+unclassified <- 100 - colSums(d_norm$abund) %>% 
+  as.data.frame() 
+
+unclassified <- unclassified %>% 
+  mutate(SampleID = rownames(unclassified)) %>% 
+  tibble() %>% 
+  rename("unclassified_abun" = ".") %>% 
+  left_join(data_long %>% distinct(SampleID, WWTP_ID, WWTP_ID2, country_code, identy_cutoff, continent))
+
+
+
+unclassified %>% 
+  filter(identy_cutoff == 0.945) %>% 
+  summary()
+
+
+data_long_included_genus_level_classified <- data_long %>% 
+  filter(identy_cutoff %in% c(0.945)) %>% 
+  distinct(SampleID, .keep_all = TRUE) %>% 
+  left_join(unclassified %>% distinct(SampleID, unclassified_abun)) %>% 
+  mutate(Classified_reads = 100 - unclassified_abun) 
+
+
+```
+
+###  Numbers for classified bacteria 
+
+```{r}
+
+unclassified %>% 
+    filter(identy_cutoff == 0.945) %>% 
+  summarise(min = 100-min(unclassified_abun) ,
+            max = 100- max(unclassified_abun)
+            )
+
+unclassified %>% 
+    filter(identy_cutoff == 0.945) %>% 
+  arrange(unclassified_abun)
+
+```
+
+### Figure S3: Unclassified reads
+
+```{r}
+
+colors <- c("#D57F5A", "#E2B97F", "#4C6B7D", "#6F8D55", "#A8A8A8")
+
+
+data_long_included_genus_level_classified %>% 
+  ggplot(aes(x = technical_replicate, y = Classified_reads, fill = continent)) + 
+  geom_col() +
+  scale_fill_manual(values = colors) +
+  scale_y_continuous(expand = c(0,0)) +
+  ylab("Classified reads [%]") +
+  xlab("Technical replicate") +
+  ggh4x::facet_nested(~continent+WWTP_ID2, space = "free", scales = "free_x") +
+  guides(fill = guide_legend(title = "Continent")) +
+  theme(panel.grid.minor = element_blank(), 
+        legend.title = element_blank(), 
+        strip.text.x = element_text(color = "black", face = "bold", 
+                                    angle = 0, vjust = 0.5, hjust = 0.5, size = 14),
+        axis.title.x =element_text(size = 16, color = "black"),
+        axis.text.x = element_text(size = 16, color = "black"#, angle = 45, hjust = 1
+                                   ),
+        axis.text.y = element_text(size = 16, color = "black"),
+        axis.title.y = element_text(size = 16, color = "black"),
+        legend.text = element_text(size = 16, color = "black"), 
+        strip.placement = "outside", 
+        plot.margin=margin(c(.1,.1,.1,.1),unit="pt"),
+        strip.background.x = element_rect(fill = "grey80"),
+        strip.background.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position = "bottom", legend.key = element_rect(fill = "grey85")) 
+
+
+plot_name = "Supplementary_figure_3"
+ggsave(paste0(OutputPath, "figures_supplementary/", plot_name,".png"), width = 15.1, height = 8)
+ggsave(paste0(OutputPath, "figures_supplementary/", plot_name,".pdf"), width = 15.1, height = 8, limitsize = F,  useDingbats=FALSE)
+
+rm(unclassified, data_long_included_genus_level_classified)
+```
+
+
+---
+
+# SRA: Prepare upload
+
+## Sample metadata
+
+```{r, eval=FALSE, echo=TRUE}
+
+included_samples <- data_long %>% 
+  filter(identy_cutoff %in% c(0.945)) %>% 
+  select(-samples)
+
+format_gps <- function(latitude, longitude) {
+  # Determine N/S and E/W
+  lat_direction <- ifelse(latitude >= 0, "N", "S")
+  lon_direction <- ifelse(longitude >= 0, "E", "W")
+  
+  # Absolute values to remove negative sign
+  abs_latitude <- abs(latitude)
+  abs_longitude <- abs(longitude)
+  
+  # Format with 4 decimal places
+  formatted_latitude <- sprintf("%.4f", abs_latitude)
+  formatted_longitude <- sprintf("%.4f", abs_longitude)
+  
+  # Create the formatted string
+  formatted_coords <- paste0(formatted_latitude, " ", lat_direction, " ", formatted_longitude, " ", lon_direction)
+  
+  return(formatted_coords)
+}
+
+metadata_ncbi <- included_samples %>% 
+  mutate(
+    sample_name = SampleID, 
+    sample_title = paste0("16S rRNA gene amplicon sequencing of ", SampleID, " from ", WWTP_ID2),
+    organism = "activated sludge metagenome",
+    collection_date = format(Date, "%Y-%m-%d"), 
+    env_broad_scale = "aquatic biome [ENVO:00002030]", 
+    env_local_scale = "activated sludge [ENVO:00002046]", 
+    env_medium = "activated sludge [ENVO:00002046]", 
+    Configuration = paste0("WWTP","; ", process_type),
+    bioproject_accession = NA,
+    geo_loc_name = paste0(
+  if_else(str_detect(country, "Hong Kong"), "Hong Kong", country),
+  ": WWTP (", country_code, ")"),
+  lat_lon = format_gps(longitude = rndCoord.lon, latitude =  rndCoord.lat),
+  lat_lon = if_else(country_code == "SG", paste0("1.3521 N 103.8198 E"), lat_lon),
+  ) %>% 
+  select(sample_name, sample_title, bioproject_accession, 
+         organism, collection_date, env_broad_scale, env_local_scale, env_medium, 
+         geo_loc_name, lat_lon,
+         Configuration, technical_replicate#, library_ID
+         ) 
+
+# Create sample_names()# Create a new workbook
+my_wb <- createWorkbook()
+# Add a worksheet to the workbook
+addWorksheet(my_wb, "Sheet1")
+# Write the data to the worksheet
+writeData(my_wb, "Sheet1", metadata_ncbi)
+# Save the workbook to a file
+saveWorkbook(my_wb, paste0(WD, "output/files/SRA_upload/20250425_metadata_ncbi.xlsx"))
+
+
+
+```
+
+
+## SRA metadata 
+
+```{r, eval=FALSE, echo=TRUE}
+########################
+# SRA metadata ### 
+#################################
+
+SRA_metadata <- 
+  metadata_ncbi %>% 
+  ungroup() %>% 
+  mutate(
+    library_ID = paste0(sample_name, "_", collection_date, "_", technical_replicate), 
+    sample_name = sample_name,
+    library_ID = library_ID, 
+    title = "Amplicon sequencing of samples from global wastewater treatment plants", 
+    library_strategy = "AMPLICON",
+    library_source = "METAGENOMIC", 
+    library_selection = "PCR", 
+    library_layout = "single", 
+    platform = "OXFORD_NANOPORE", 
+    instrument_model = "MinION",
+    design_description = "V1-V8 primers used had the following sequences:  5′-TTTCTGTTGGTGCTGATATTGC-AGRGTTYGATYMTGGCTCAG-3′ (NP-V1V8f); ACTTGCCTGTCGCTCTATCTTC-GACGGGCGGTGWGTRCA (NP-V1V8r) (Klindworth et al., 2013).",
+    filename = sample_name, 
+    filetype = "fastq",
+    ) %>% 
+  select(sample_name, library_ID, title, library_strategy,library_source,	library_selection,
+         library_layout,	platform,	instrument_model,	design_description,	filetype)
+
+
+# Read excel with file names
+file_names <- vroom::vroom(paste0(WD, "data/amplicon_data/sample_file_list.tsv"))  %>% 
+  mutate(
+    barcode = str_extract(sample_name, "barcode[0-9]+"),
+    sample_name = str_replace(sample_name, "__", "_"),
+    sample_name = str_replace(sample_name, "2401p3_ID_945_", ""),
+        sample_name = str_replace(sample_name, "2401p1_ID_945_", ""),
+  ) %>% 
+  group_by(barcode) %>%
+  mutate(file_number = paste0("filename", row_number())) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = file_number, values_from = file_name, values_fill = "") %>% 
+  select(-barcode) %>% 
+  rename("filename" = "filename1")
+  
+
+
+SRA_metadata_all_files <- 
+  SRA_metadata %>% 
+  left_join(file_names)
+
+# Create a new workbook
+my_wb <- createWorkbook()
+# Add a worksheet to the workbook
+addWorksheet(my_wb, "SRA_data")
+# Write the data to the worksheet
+writeData(my_wb, "SRA_data", SRA_metadata_all_files)
+# Save the workbook to a file
+saveWorkbook(my_wb, paste0(WD, "output/files/SRA_upload/20250425_SRA_metadata.xlsx"))
+
+
+write.table(
+  SRA_metadata_all_files,
+  file = paste0(WD, "output/files/SRA_upload/20250425_SRA_metadata.tsv"),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+```
+
+---
+
+
+# Figures for EPS section 
+
+## Import: Yield and PN 
+
+```{r}
+data_EPS_yield <- 
+  readxl::read_excel(paste0(WD, "data/EPS_data/Extractions Rethink_PN_SP_YIELD.xlsx"), sheet = 1,
+                     col_types = c("guess", "numeric", "numeric", "numeric", "numeric", "guess", "guess")
+                    ) %>% 
+  mutate(
+    Yield = as.numeric(str_replace(Yield, ",", ".")),
+    STD_yield = as.numeric(str_replace(STD...7, ",", ".")),
+    
+    PN = as.numeric(str_replace(`g PN in 100 g EPS VS`, ",", ".")),
+    STD_PN = as.numeric(str_replace(STD...3, ",", ".")),
+    
+    PS = as.numeric(str_replace( `g PS in 100 g EPS VS`, ",", ".")),
+    STD_PS = as.numeric(str_replace(STD...5, ",", ".")),
+    
+    PN_PS = PN/PS,
+    ) %>% 
+  select(- `g PS in 100 g EPS VS`, -`g PN in 100 g EPS VS`, -STD...5, -STD...7, -STD...3) %>% 
+  mutate(
+    Sample = sub("_.*", "", Sample),
+    Sample = str_replace(Sample, "WWTP13", "WWTP18"), 
+    WWTP_ID = Sample) %>% 
+  inner_join(data_long %>% distinct(WWTP_ID, WWTP_ID2), by = join_by(WWTP_ID))
+
+
+
+```
+
+
+## Import PCA scoring and loading data
+
+```{r}
+data_EPS_PC<- 
+  readxl::read_excel(paste0(WD, "data/EPS_data/20240122_PCA_scoring_Stefan.xlsx"), sheet = 1)
+
+ftir_data <- 
+  readxl::read_excel(paste0(WD, "data/EPS_data/PCA_loading.xlsx"), sheet = 1) %>% 
+  rename("wavenumber" = "...1") %>% 
+  pivot_longer(cols = c(PC1, PC2, PC3), names_to = "PC", values_to = "absorbance")
+
+
+```
+
+
+## Figure 1: Plot EPS Yield 
+
+```{r}
+
+
+colors <- c("#D57F5A", "#E2B97F", "#4C6B7D", "#6F8D55", "#A8A8A8")
+
+plot1 <- data_EPS_yield %>% 
+  filter(WWTP_ID2 != "HK") %>% 
+  select(-PS) %>% 
+  mutate(x="x") %>% 
+  left_join(metadata_all %>% distinct(WWTP_ID2, .keep_all = T)) %>% 
+  ggplot(aes(x= WWTP_ID2, y = Yield, fill = continent)) + 
+  geom_col() + 
+    ylab(expression("Weight % of the organic fraction"
+                    #~"\n"~"("~g[VSS]*EPS/100~g[VSS]*AS~")"
+                    )) + 
+  geom_errorbar(aes(ymin=if_else(Yield-STD_yield < 0, 0, Yield-STD_yield), ymax=Yield+STD_yield), width=.2,
+                 position=position_dodge(.9)) + 
+  facet_grid(x~process_type, scales = "free", space = "free") +
+  scale_fill_manual(values = colors) +
+   theme_light() + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) + 
+  scale_x_discrete(expand = expansion(mult = c(0, 0))) +
+  theme(panel.grid.minor = element_blank(), 
+        legend.title = element_blank(), 
+        strip.text.x = element_text(color = "black", face = "bold", 
+                                    angle = 0, vjust = 0.5, hjust = 0.5, size = 14),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 16, color = "black"),
+        axis.text.x = element_text(size = 16, color = "black"),
+        axis.title.y = element_text(size = 18, color = "black"),
+        legend.text = element_text(size = 16, color = "black"), 
+        strip.background.x = element_rect(fill = "grey80"),
+        strip.background.y = element_blank(),
+        legend.position = "bottom")
+
+plot1
+plot_name = "Figure_1"
+ggsave(plot = plot1, paste0(OutputPath, "figures_main/" ,plot_name,".png"), width = 15.1, height = 8)
+ggsave(plot = plot1, paste0(OutputPath, "figures_main/", plot_name,".pdf"), width = 15.1, height = 8, limitsize = F,  useDingbats=FALSE)
+
+
+```
+
+
+## Figure 2: Plot EPS PN/PS 
+
+```{r}
+
+plot_data <- 
+  data_EPS_yield %>% 
+  mutate(x="x") %>% 
+  left_join(metadata_all %>% distinct(WWTP_ID2, .keep_all = T) %>% select(-PS)) %>% 
+  mutate(
+    STD_PN = as.numeric(STD_PN),
+    STD_PS = as.numeric(STD_PS),
+    PS = as.numeric(PS),
+    PN = as.numeric(PN),
+    PN_min = PN - STD_PN, 
+    PN_max = PN + STD_PN, 
+    PS_min = PS - STD_PS, 
+    PS_max = PS + STD_PS, 
+    PN = paste0(PN, ";",STD_PN),
+    PS = paste0(PS, ";",STD_PS),
+  ) %>% #select(PS_max, PS) %>% print(n= 100)
+  pivot_longer(cols = c(PN, PS), names_to = "names", values_to = "values") %>%  
+  separate(values, into = c("values", "STD"), sep = ";") %>% 
+  pivot_longer(cols = c(STD_PN, STD_PS), names_to = "names_STD", values_to = "values_STD") %>% 
+  mutate(
+    values = as.numeric(values), 
+    STD = as.numeric(STD),
+    names_num = factor(names), 
+    names_num = as.numeric(names_num), 
+    min_PN_PS =  PN_min / PS_max,
+    max_PN_PS =  PN_max / PS_min,
+    ) %>% 
+  distinct(WWTP_ID2, names, names_num, .keep_all = T) %>% 
+  mutate(x = "PN/PS ratio") %>% 
+  filter(country_code != "HK") 
+  
+
+
+colors <- c("#D9A066", "#8C5E3C")
+
+plot1 <- 
+  plot_data %>% 
+  ggplot(aes(x= names, y = values, fill = names)) +
+  geom_col() + 
+#  ylab(expression("Weight % of the organic fraction"~(g[VSS]*EPS/100*g[VSS]*AS))) +
+    ylab(("Protein and polysaccharides in weight %\n(gBSA/glucose per 100g VS in EPS)")) + 
+  geom_errorbar(aes(ymin=values-STD, ymax=values+STD), width=.2, 
+                 position=position_dodge(.9), color = "black") + 
+  ggh4x::facet_nested(x~continent+WWTP_ID2, scales = "free", space = "free") +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = c("black")) +
+  theme_light() + 
+  geom_rect(data = plot_data %>% 
+                distinct(continent, names, values, WWTP_ID2, PN_PS, max_PN_PS, min_PN_PS), 
+             aes(xmin = "PN",xmax = "PS", ymin = min_PN_PS*3, ymax = max_PN_PS*3), 
+            fill = "grey70", 
+            alpha = 0.4) +
+  geom_errorbar(data = plot_data %>% 
+                distinct(continent, names, values, WWTP_ID2, PN_PS, max_PN_PS, min_PN_PS) %>% 
+                  filter(names == "PN"),
+                aes(ymin=min_PN_PS*3, ymax=max_PN_PS*3), width=.18, color = "black",#"grey40",
+                 position = position_nudge(x = 0.5)) + 
+  geom_segment(data = plot_data %>% distinct(continent, WWTP_ID2, PN_PS, names, x),
+             aes(
+               x = "PN", y = PN_PS*3, xend = "PS", yend = PN_PS*3, color = x), 
+               #yintercept = PN_PS*6, 
+             #  linetype = "PN/PS ratio", 
+             
+             ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)), 
+                     sec.axis = sec_axis(~ . / 3, name = "PN/PS ratio")) + 
+  theme(panel.grid.minor = element_blank(), 
+        legend.title = element_blank(), 
+        strip.text.x = element_text(color = "black", face = "bold", 
+                                    angle = 0, vjust = 0.5, hjust = 0.5, size = 14),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 16, color = "black"),
+        axis.text.y = element_text(size = 16, color = "black"),
+        axis.title.y = element_text(size = 16, color = "black"),
+        legend.text = element_text(size = 16, color = "black"), 
+        strip.placement = "outside", 
+        plot.margin=margin(c(.1,.1,.1,.1),unit="pt"),
+        strip.background.x = element_rect(fill = "grey80"),
+        strip.background.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position = "bottom", legend.key = element_rect(fill = "grey85")) 
+
+
+
+plot1
+plot_name = "Figure_2"
+ggsave(plot = plot1, paste0(OutputPath,  "figures_main/" ,plot_name,".png"), width = 15.1, height = 7)
+ggsave(plot = plot1, paste0(OutputPath,  "figures_main/" ,plot_name,".pdf"), width = 15.1, height = 7, limitsize = F,  useDingbats=FALSE)
+
+```
+
+
+## Figure S1: Correlation STR and yield
+
+```{r}
+
+colors <- c("#D57F5A", "#E2B97F", "#4C6B7D", "#6F8D55", "#A8A8A8")
+
+
+
+plot_data %>% 
+  distinct(WWTP_ID2, continent, SRT, Yield) %>%
+  ggplot(aes(x = SRT, y = Yield)) + 
+  geom_point(aes(fill = continent),shape = 21, color = "black", size = 5) +
+  geom_text_repel(aes(label = WWTP_ID2), show.legend = F, 
+                  color = "black",box.padding = unit(1.5, "mm"), min.segment.length = unit(2, "cm")) +
+  scale_fill_manual(values = colors) +
+  theme_light() + 
+  guides(fill = guide_legend(title = "Continent", nrow = 1), 
+         color = "none") + 
+  ylab("EPS yield [%]") +  
+  xlab("SRT [Days]") +
+  smplot2::sm_statCorr(
+    color = "black", corr_method = "spearman",label_y = 0, text_size = 5, R2 = TRUE) +
+   theme(legend.position = "bottom",
+        axis.title = element_text(size = 12, color = "black"),
+        #plot.tag = element_text(size = 25),
+        axis.text = element_text(size = 12, color = "black"),
+        legend.text = element_text(size = 12, color = "black"),
+        legend.title = element_blank() #(size = 14, color = "black", face  = "bold"),
+        )
+plot_name = "Supplementary_figure_S1"
+ggsave(paste0(OutputPath,  "figures_supplementary/" ,plot_name,".png"), width = 7, height = 7)
+ggsave(paste0(OutputPath,  "figures_supplementary/" ,plot_name,".pdf"), width = 7, height = 7, limitsize = F,  useDingbats=FALSE)
+
+
+```
+
+## Figure 4
+
+### Figure 4B: Plot PCA1-3 data from EPS 
+
+```{r}
+
+plot_data <- metadata_all %>% 
+  distinct(WWTP_ID2, .keep_all = T) %>% 
+  select(WWTP_ID2, continent, Temperature_process_tank_C, process_type, climate) %>% 
+  right_join(data_EPS_PC %>% rename("WWTP_ID2" = 2) %>% select(-1))
+
+
+# Plot
+plot2 <- ggplot(ftir_data, aes(x = wavenumber, y = absorbance, color = PC)) +
+  geom_line(linewidth = 0.8) + 
+  scale_y_continuous(breaks = c(0, 0.05)) +
+  scale_x_reverse(sec.axis = sec_axis(~ ., #name = "Carbon & Phosphate", 
+                                      breaks = c(2971, 2924, 2850, 1741, 1670, 1605, 1527, 1366, 1218, 1100, 998),
+                                      labels = c(2971, 2924, 2850, 1741, 1670, 1605, 1527, 1366, 1218, 1100, 998))
+                  ) +  # Wavenumber axis should decrease from left to right
+  labs(
+    x = (expression("Wavenumber (cm"^{-1}*")")),
+    #x = "Wavenumber (cm⁻¹)", 
+       y = "Relative absorbance (a.u.)"#, title = "FTIR Spectrum"
+       ) +
+    theme_light() + 
+  scale_color_manual(values = c(#"#D57F5A", "#E2B97F", 
+                                "#4C6B7D", "#4C6B7D", "#4C6B7D"#, #"#6F8D55"#,
+                                #"#A8A8A8"
+                                )) +
+  facet_wrap(~PC,  dir = "v", strip.position = "right", ) + 
+  geom_vline(xintercept = c(2971, 2924, 2850, 1741, 1670, 1605, 1527, 1366, 1218, 1100, 998), linetype = "dotted", ) + 
+  theme(
+    strip.background = element_rect(fill = "white"), 
+    strip.text = element_text(angle = 0, color = "black", size = 14), 
+    axis.text.x.top = element_text(angle = 45, hjust = 0.2, vjust = 0.2, size = 10), 
+    axis.title =  element_text(size = 14),
+    strip.placement = "inside"
+  ) + 
+  guides(color = "none")
+
+
+# plot_name = "EPS_PCA_loading"
+# ggsave(plot = plot2, paste0(OutputPath, plot_name,".png"), width = 10, height = 5)
+
+
+```
+
+### Figure 4A: Plot  PCA1-3
+
+```{r}
+
+colors <- c("#D57F5A", "#E2B97F", "#4C6B7D", "#6F8D55", "#A8A8A8")
+
+plot1 <- plot_data %>% 
+  left_join(data_EPS_yield#rename("WWTP_ID2" = 2)
+               ) %>% 
+  ggplot(aes(x = PC1, y = PC2, color = process_type)) + 
+  geom_point(aes(fill = process_type),shape = 21, color = "black", size = 5) +
+  geom_text_repel(aes(label = WWTP_ID2), show.legend = F, color = "black",box.padding = unit(1.5, "mm"), min.segment.length = unit(2, "cm")) +
+  xlab("PC1 (39.2%)") +
+  ylab("PC2 (26.7%)") +
+  labs(tag = "A") +
+  theme_light()+ 
+   theme(legend.position = "bottom", 
+        axis.title = element_text(size = 14, color = "black"),
+        plot.tag = element_text(size = 25), 
+        axis.text = element_text(size = 12, color = "black"),
+        legend.text = element_text(size = 12, color = "black"),
+        legend.title = element_text(size = 12, color = "black"),
+        ) + 
+  guides(fill = guide_legend(title = "Process type")) +
+  scale_fill_manual(values = colors) +
+  ############
+  plot_data %>% 
+  ggplot(aes(x = PC1, y = PC3, color = process_type)) + 
+  geom_point(aes(fill = process_type),shape = 21, color = "black", size = 5) +
+  geom_text_repel(aes(label = WWTP_ID2), show.legend = F, color = "black",box.padding = unit(1.5, "mm"), min.segment.length = unit(2, "cm")) +
+    scale_fill_manual(values = colors) +
+  xlab("PC1 (39.2%)") +
+  ylab("PC3 (14.3%)") +
+    theme_light() + 
+   theme(legend.position = "bottom", 
+        axis.title = element_text(size = 14, color = "black"),
+        plot.tag = element_text(size = 25), 
+        axis.text = element_text(size = 12, color = "black"),
+        legend.text = element_text(size = 12, color = "black"),
+        legend.title = element_text(size = 12, color = "black"),
+        ) +
+  guides(fill = guide_legend(title = "Process type")) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = 'bottom') 
+plot1
+
+
+
+
+```
+
+
+### Figure 4: Merge A + B 
+
+
+```{r}
+
+top_plot <- wrap_elements(
+  plot1) + plot_annotation(
+    tag_levels = 'A',  # optional, if you want automatic tags
+    theme = theme(plot.tag = element_text(size = 35))
+  )
+
+top_plot <- wrap_elements(
+  plot1 + labs(tag = "A") +
+    theme(plot.tag = element_text(size = 35, hjust = "1"))
+)
+
+bottom_plot   <- wrap_elements(plot2 + 
+  plot_annotation(
+    tag_levels = 'A',  # optional, if you want automatic tags
+    theme = theme(plot.tag = element_text(size = 35))
+  ))
+  
+top_plot / bottom_plot +
+  theme(legend.position = "bottom", 
+        axis.title = element_text(size = 14, color = "black"),
+        plot.tag = element_text(size = 25), 
+        axis.text = element_text(size = 12, color = "black"),
+        legend.text = element_text(size = 12, color = "black"),
+        legend.title = element_text(size = 12, color = "black"),
+        )
+
+
+# Add tags to each part using labs()
+plot2_tagged <- plot2 + 
+  labs(tag = "B") +
+  theme(plot.tag = element_text(size = 25))
+
+# Combine the tagged plots
+final_plot <- plot1 / plot2_tagged +
+  plot_layout(guides = "collect", nrow = 2, heights = c(1, 0.8)) & 
+  theme(
+    legend.position = "bottom",
+    axis.title = element_text(size = 14, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black")
+  )
+
+
+plot_name = "Figure_4"
+ggsave(paste0(OutputPath, "figures_main/", plot_name,".png"), width = 12, height = 10)
+ggsave(paste0(OutputPath, "figures_main/", plot_name,".pdf"), width = 12, height = 10, limitsize = F,  useDingbats=FALSE)
+
+```
+
+
+## Statistics for Figure 4: 
+
+### Adonis of all grouping values 
+
+```{r}
+# Grouping factor (continent)
+grouping_factor <- plot_data$process_type %>% as.factor()
+
+# PCA coordinates (PC1, PC2, PC3)
+pca_coords <- plot_data[, c("PC1", "PC2", "PC3")]
+#pca_coords <- plot_data[, c("PC1", "PC2")]
+
+# Running the Adonis test
+method = "euclidian"
+
+adonis_result <- vegan::adonis2(pca_coords ~ grouping_factor, data = plot_data, permutations = 999, 
+                                method = method)
+
+
+# View results
+summary(adonis_result)
+
+grouping_factor <- plot_data$process_type
+adonis_result <- vegan::adonis2(pca_coords ~ grouping_factor, data = plot_data, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+grouping_factor <- plot_data$continent
+adonis_result <- vegan::adonis2(pca_coords ~ grouping_factor, data = plot_data, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+grouping_factor <- plot_data$Temperature_process_tank_C
+adonis_result <- vegan::adonis2(pca_coords ~ grouping_factor, data = plot_data, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+
+grouping_factor <- plot_data$climate
+adonis_result <- vegan::adonis2(pca_coords ~ grouping_factor, data = plot_data, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+grouping_factor <- plot_data$continent
+adonis_result <- vegan::adonis2(pca_coords ~ grouping_factor, data = plot_data, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+
+
+######## ADDING YIELD AND PN AND PS
+
+plot_data2 <-  plot_data %>% 
+  left_join(data_EPS_PC %>% rename("WWTP_ID" = "wwtp nr") %>% mutate(WWTP_ID = if_else(id == "SA", "WWTP18",WWTP_ID)) %>% select(-id)) %>% 
+  left_join(data_EPS_yield %>% select(-WWTP_ID2, -Sample)) %>% 
+  filter(WWTP_ID2 != "HK")
+
+
+# PCA coordinates (PC1, PC2, PC3)
+pca_coords2 <- plot_data2[, c("PC1", "PC2", "PC3")]
+
+# Running the Adonis test
+
+method = "euclidian"
+
+grouping_factor <- plot_data2$Yield
+adonis_result <- vegan::adonis2(pca_coords2 ~ grouping_factor, data = plot_data2, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+grouping_factor <- plot_data2$PN
+adonis_result <- vegan::adonis2(pca_coords2 ~ grouping_factor, data = plot_data2, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+
+grouping_factor <- plot_data2$PS
+adonis_result <- vegan::adonis2(pca_coords2 ~ grouping_factor, data = plot_data2, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+
+grouping_factor <- plot_data2$PN_PS
+adonis_result <- vegan::adonis2(pca_coords2 ~ grouping_factor, data = plot_data2, permutations = 999, 
+                                method = method)
+summary(adonis_result)
+
+
+
+```
+
+### Pairwise Adonis of process types 
+
+```{r}
+
+grouping_factor <- plot_data$process_type %>% as.factor()
+str(grouping_factor)
+levels(grouping_factor)
+
+plot_data$process_type <- as.factor(plot_data$process_type)
+str(plot_data$process_type)
+levels(plot_data$process_type)
+
+plot_data$process_type <- factor(plot_data$process_type, levels = unique(plot_data$process_type))
+nrow(pca_coords)
+nrow(plot_data)
+
+pairwise_result <- pairwiseAdonis::pairwise.adonis2(pca_coords ~ process_type, 
+                                    data = plot_data,
+                                    method = "euclidean", 
+                                    p.adjust.m = "bonferroni")  # Adjust for multiple testing
+
+print(pairwise_result)
+
+
+# Define valid group levels
+group_levels <- c("Cb,N,DN,P(B)", "Cb,N,DN", "Cb,N", "Cb,N,DN,P(C)", "Cb")
+
+
+
+
+pairwise_df <- as.data.frame(pairwise_result)[1, ]
+# Define possible metrics
+metrics <- c("Df", "SumOfSqs", "R2", "F", "Pr..F.")
+
+# Create regex pattern for metrics
+metric_pattern <- paste(metrics, collapse = "|")
+
+# Convert to long format
+pairwise_long <- pairwise_df %>%
+  pivot_longer(cols = -parent_call, names_to = "Comparison", values_to = "Value") %>%
+  mutate(
+    Group1 = str_extract(Comparison, "^[^_]+(?:\\.[^_]+)*"),  # Extract everything before "_vs_"
+    Model_Metric = str_extract(Comparison, metric_pattern),  # Extract the metric
+    Group2 = str_remove(str_remove(Comparison, "^.*?_vs_"), paste0("\\.", Model_Metric, "$"))  # Extract after "_vs_" but before metric
+  ) %>%
+  relocate(Group1, Group2, Model_Metric, Value) %>% 
+  select(-Comparison, -parent_call) %>% 
+  filter(!Model_Metric %in% c("Df", "SumOfSqs")) %>% 
+  mutate(Model_Metric = if_else(Model_Metric == "Pr..F.", "Pr(>F)", Model_Metric), 
+         Value = round(Value, 3)) %>% 
+  mutate(Significant = if_else(Value < 0.05, T, F))
+
+# Convert to a nicely formatted Word table
+pairwise_flex <- flextable::flextable(pairwise_long) %>%
+  flextable::set_caption("Pairwise PERMANOVA Results") %>% 
+   flextable::align(align = "center", part = "all") %>%
+  flextable::bold(part = "header")
+
+flextable::save_as_docx(pairwise_flex, path = paste0(OutputPath, "tab_pairwise_results_process_type.docx"))
+
+```
+
+---
+
+# Figures for the microbial section 
+
+## Data subset 
+
+```{r}
+
+data_long_included_genus_level <- data_long %>% 
+  filter(identy_cutoff %in% c(0.945)) 
+
+data_long_included_phylum_level <- data_long %>% 
+    filter(identy_cutoff %in% c(0.82))
+
+
+```
+
+
+## Get number of distinct genera to article
+
+```{r}
+
+data_long_included_genus_level %>% 
+        mutate(samples = map(.x = samples, ~distinct(.x, Genus, rel_abun_genus) %>% 
+                               filter(rel_abun_genus > 0)
+                               )) %>%
+  unnest(samples) %>% 
+  distinct(Genus)
+
+
+
+data_long_included_genus_level %>% 
+        mutate(samples = map(.x = samples, ~distinct(.x, Genus, rel_abun_genus) %>% 
+                               filter(rel_abun_genus >= 0.1)
+                               )) %>%
+  unnest(samples) %>% 
+  distinct(Genus)
+
+
+data_long_included_genus_level %>% 
+        mutate(samples = map(.x = samples, ~distinct(.x, Genus, rel_abun_genus) %>% 
+                               filter(rel_abun_genus > 0.1)
+                               )) %>%
+  unnest(samples) %>%
+  distinct(Genus, WWTP_ID2) %>% 
+  group_by(WWTP_ID2) %>% 
+  summarise(n =  n()) %>% 
+  arrange(n)
+
+```
+
+
+## Figure S4: Total number of distinct genera and genera in >0.1% abundance 
+
+```{r}
+
+plot_df <- data_long_included_genus_level %>% 
+        mutate(samples = map(.x = samples, ~distinct(.x, Genus, rel_abun_genus) %>% 
+                               distinct(Genus, rel_abun_genus) %>%
+                               filter(rel_abun_genus != 0) %>% 
+                               mutate(type = if_else(rel_abun_genus >= 0.1, "≥0.1%", "<0.1%")) %>%
+                               group_by(type) %>% 
+                               summarise(rel_abun_genus = sum(rel_abun_genus), 
+                                         n_genus = n())
+                                        
+                               )) %>%
+  unnest(samples) %>%
+  distinct(WWTP_ID2, continent, n_genus, rel_abun_genus, type) %>% 
+  group_by(WWTP_ID2, continent, type) %>% 
+  summarise(n_genus = mean(n_genus), 
+            rel_abun_genus = mean(rel_abun_genus)) %>% 
+  pivot_longer(cols = c(n_genus, rel_abun_genus), names_to = "names", values_to = "value") %>% 
+  mutate(names = if_else(names == "n_genus", "Number of genera", names), 
+         names = if_else(names == "rel_abun_genus", "Summarised relative abundance [%]", names),
+         ) 
+
+mean <- plot_df %>% 
+  group_by(type, names) %>% 
+  summarise(mean = mean(value))
+
+plot_df %>% 
+  left_join(mean) %>% 
+ ggplot(aes(x = type, y = value, fill = continent)) + 
+  geom_col() +
+  scale_fill_manual(values = colors) +
+  scale_y_continuous(expand = c(0,0)) +
+  #ylab("Classified reads [%]") +
+  xlab("Abundance group") +
+  geom_hline(aes(yintercept = mean, linetype = type ), color = "black") +
+  ggh4x::facet_nested(names~continent+WWTP_ID2, space = "free_x", scales = "free", switch = "y") +
+  guides(fill = guide_legend(title = "Continent"), 
+         linetype = guide_legend(title = "Abundance group")) +
+  theme(panel.grid.minor = element_blank(), 
+                panel.spacing=unit(0.4,"mm"),
+        legend.title = element_text(size = 16, color = "black"),
+        strip.text.x = element_text(color = "black", face = "bold", 
+                                    angle = 0, vjust = 0.5, hjust = 0.5, size = 14),
+        axis.title.x = element_text(size = 16, color = "black"),
+        axis.text.x = element_text(size = 14, color = "black", angle = 45, hjust = 1
+                                   ),
+        axis.text.y = element_text(size = 16, color = "black"),
+        axis.title.y = element_blank(), # element_text(size = 16, color = "black"),
+        legend.text = element_text(size = 16, color = "black"), 
+        strip.placement = "outside", 
+        strip.text.y.left = element_text(size = 16, color = "black", angle = 90),
+        plot.margin=margin(c(.1,.1,.1,.1),unit="pt"),
+        strip.background.x = element_rect(fill = "grey80"),
+        strip.background.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position = "bottom", legend.key = element_rect(fill = "grey85")) 
+
+
+plot_name = "Supplementary_figure_S4"
+ggsave(paste0(OutputPath,  "figures_supplementary/" ,plot_name,".png"), width = 16, height = 12)
+ggsave(paste0(OutputPath, "figures_supplementary/" ,plot_name,".pdf"), width = 16, height = 12, limitsize = F,  useDingbats=FALSE)
+
+```
+
+## Figure 5
+
+### Adonis results: To be plotted as text on the plots 
+
+```{r}
+set.seed(123)
+
+ADONIS_result <- 
+  data_long_included_genus_level %>% 
+  group_by(WWTP_ID2) %>% 
+  sample_n(1) %>% 
+  ungroup() %>% 
+  filter(!is.na(Temperature_process_tank_C) #&
+         #  !is.na(PE_treated_number)
+         ) %>% 
+  #filter(process_type %in% c("C,N,DN,P", "C,N,DN")) %>% #distinct(country_code_WWTP_ID)
+  ADONIS_from_long_df(tax_level = "Genus", 
+    abun_limit = 0.1,
+    test_varibles = c("Temperature_process_tank_C", 
+                      "continent", 
+                      "climate",
+                      "process_type", 
+                      "country_code"
+                      )
+    )
+
+asis_output(ADONIS_result$result)
+
+
+
+```
+
+
+### Figure 5: Contintent and process type 
+
+
+```{r}
+
+colors <- c("#D57F5A", "#E2B97F", "#4C6B7D", "#6F8D55", "#A8A8A8")
+
+annotation_text1 <- paste0("Continent:\nR² = ", 43, "%, p < 0.001")
+annotation_text2 <- paste0("Process type:\nR² = ", 40, "%, p < 0.007")
+
+
+  ## PLOT COntininet 
+data_long_included_genus_level %>% 
+  PCOA_from_long_df(color_by = "continent", tax_level = "Genus", abun_limit = 0.1, extra_column = "WWTP_ID2") + 
+  geom_point(aes(fill = color),shape = 21, color = "black", size = 5) +
+  geom_text_repel(aes(label = extra_column_name), show.legend = F, 
+                  color = "black",box.padding = unit(1.5, "mm"), min.segment.length = unit(2, "cm")) +
+    scale_fill_manual(values = colors) +
+  theme_light() + 
+  guides(fill = guide_legend(title = "Continent", nrow = 2), 
+         color = "none") + 
+  annotate(
+    "label",
+   x = -0.4, y = -0.44,  # Adjust position
+    label = annotation_text1,
+    hjust = 0,
+    size = 5,
+    label.size = 0.5,  # Black border
+    fill = "white",    # White background
+    color = "black"    # Text color
+  ) +
+  ## PLOT PROCESS TYPE
+  data_long_included_genus_level %>% 
+  PCOA_from_long_df(color_by = "process_type", tax_level = "Genus", abun_limit = 0.1, extra_column = "WWTP_ID2") + 
+  geom_point(aes(fill = color),shape = 21, color = "black", size = 5) +
+  geom_text_repel(aes(label = extra_column_name), show.legend = F, 
+                  color = "black",box.padding = unit(1.5, "mm"), min.segment.length = unit(2, "cm")) +
+    scale_fill_manual(values = colors) +
+  theme_light() + 
+  guides(fill = guide_legend(title = "Process type", nrow = 2), 
+         color = "none") + 
+  annotate(
+    "label",
+   x = -0.4, y = -0.44,  # Adjust position
+    label = annotation_text2,
+    hjust = 0,
+    size = 5,
+    label.size = 0.5,  # Black border
+    fill = "white",    # White background
+    color = "black"    # Text color
+  ) +
+  plot_layout(#guides = "collect"
+              ) + 
+  plot_annotation(tag_levels = "A") & 
+  theme(legend.position = "bottom",
+        axis.title = element_text(size = 14, color = "black"),
+        plot.tag = element_text(size = 25),
+        axis.text = element_text(size = 12, color = "black"),
+        legend.text = element_text(size = 12, color = "black"),
+        legend.title = element_text(size = 14, color = "black", face  = "bold"),
+        )
+
+plot_name = "Figure_5"
+ggsave(paste0(OutputPath, "figures_main/" ,plot_name,".png"), width = 15.2, height = 7)
+ggsave(paste0(OutputPath, "figures_main/" ,plot_name,".pdf"), width = 15.2, height = 7, limitsize = F,  useDingbats=FALSE)
+
+```
+
+
+
+### Figure S5: Climate and temperature 
+
+```{r}
+
+colors <- c("#D57F5A", "#E2B97F", "#4C6B7D", "#6F8D55", "#A8A8A8", "black", "white")
+
+annotation_text1 <- paste0("Temperature in process tank:\nR² = ", 21, "%, p < 0.001")
+annotation_text2 <- paste0("Climate:\nR² = ", 54, "%, p < 0.001")
+
+
+  ## PLOT COntininet 
+data_long_included_genus_level %>% 
+  PCOA_from_long_df(color_by = "Temperature_process_tank_C", tax_level = "Genus", abun_limit = 0.1, extra_column = "WWTP_ID2") + 
+  geom_point(aes(fill = color),shape = 21, color = "black", size = 5) +
+  geom_text_repel(aes(label = extra_column_name), show.legend = F, 
+                  color = "black",box.padding = unit(1.5, "mm"), min.segment.length = unit(2, "cm")) +
+  #scale_fill_manual(values = colors) +
+    scale_fill_distiller(palette = "YlGnBu", direction = 1,  breaks = seq(0, 25, by = 5)) +
+  theme_light() + 
+  guides(fill = guide_colorbar(title = "Temperature in process tank", nrow = 1, barwidth = 12), 
+         color = "none") + 
+  annotate(
+    "label",
+   x = -0.4, y = -0.44,  # Adjust position
+    label = annotation_text1,
+    hjust = 0,
+    size = 5,
+    label.size = 0.5,  # Black border
+    fill = "white",    # White background
+    color = "black"    # Text color
+  ) +
+  ## PLOT PROCESS TYPE
+  data_long_included_genus_level %>% 
+  PCOA_from_long_df(color_by = "climate", tax_level = "Genus", abun_limit = 0.1, extra_column = "WWTP_ID2") + 
+  geom_point(aes(fill = color),shape = 21, color = "black", size = 5) +
+  geom_text_repel(aes(label = extra_column_name), show.legend = F, 
+                  color = "black",box.padding = unit(1.5, "mm"), min.segment.length = unit(2, "cm")) +
+    scale_fill_manual(values = colors) +
+  theme_light() + 
+  guides(fill = guide_legend(title = "Climate", nrow = 2), 
+         color = "none") + 
+  annotate(
+    "label",
+   x = -0.4, y = -0.44,  # Adjust position
+    label = annotation_text2,
+    hjust = 0,
+    size = 5,
+    label.size = 0.5,  # Black border
+    fill = "white",    # White background
+    color = "black"    # Text color
+  ) +
+  plot_layout(#guides = "collect"
+              ) + 
+  plot_annotation(tag_levels = "A") & 
+  theme(legend.position = "bottom",
+        axis.title = element_text(size = 14, color = "black"),
+        plot.tag = element_text(size = 25),
+        axis.text = element_text(size = 12, color = "black"),
+        legend.text = element_text(size = 12, color = "black"),
+        legend.title = element_text(size = 14, color = "black", face  = "bold"),
+        )
+
+plot_name = "Supplementary_figure_5"
+ggsave(paste0(OutputPath, "figures_supplementary/" ,plot_name,".png"), width = 15.2, height = 7)
+ggsave(paste0(OutputPath, "figures_supplementary/" ,plot_name,".pdf"), width = 15.2, height = 7, limitsize = F,  useDingbats=FALSE)
+
+
+```
+
+
+
+
+
+## Figure 6 
+
+Figure 6 is composed of multiple elements.
+
+It shows the 15 most abundant genera in each wastewater treatment plant (WWTP) and their relative read abundance across all WWTPs (112 genera in total).  
+The phylogenetic tree was constructed using full-length 16S rRNA gene sequences from a representative species for each genus, based on the MiDAS 5.3 database and **IQ-TREE**.
+
+Steps involved:
+
+- Selection of the 15 most abundant genera in each WWTP (a seperate R script has been made for this: make_tree_with_heatmap_v3.R)
+- Identification of a representative species for each genus using sequences from the MiDAS database  
+  ↳ Sequences are taken from the MiDAS database, available at: [https://www.midasfieldguide.org/guide/downloads](https://www.midasfieldguide.org/guide/downloads)
+- Construction of the phylogenetic tree using a shell script: `generate_16S_tree.sh`
+- Plotting the tree and relative abundances of each genus (a seperate R script has been made for this: make_tree_with_heatmap_v3.R) 
+- Calculation of summarized relative abundances for all genera included in the tree, across all WWTPs
+- The elements are manually merged afterwards
+
+
+### Summarised abundance for tree plot (total)
+
+```{r}
+
+set.seed(123)
+top_20_per_WWTPID <- data_long %>% 
+  filter(identy_cutoff %in% c(0.945)) %>%
+  select(-total_reads) %>% 
+  filter(!SampleContent %in% c("CTRL", "PCRPOS", "PCRNEG")) %>% 
+  filter(!str_detect(WWTP_ID2, "MiDAS")) %>% 
+  group_by(WWTP_ID2) %>% 
+  sample_n(2) %>%  
+  unnest(samples) %>%
+  group_by(WWTP_ID2, Genus) %>%
+  summarise(mean = mean(rel_abun_genus)) %>% 
+  group_by(WWTP_ID2) %>% 
+  slice_max(mean, n = 15) %>% 
+  ungroup() 
+
+top_20_per_WWTPID %>% distinct(Genus)  # 112 genera included in tree
+
+top_20_per_WWTPID %>% 
+  group_by(WWTP_ID2) %>% 
+  summarise(suym = sum(mean)) %>% 
+  arrange(suym)
+
+
+data_long_included_genus_level %>% 
+  mutate(samples = 
+               map(.x = samples, ~
+                     ungroup(.) %>% 
+                     distinct(Genus, rel_abun_genus) %>% 
+                     filter(Genus %in% unlist(top_20_per_WWTPID$Genus)))) %>% 
+  unnest(samples) %>% 
+  group_by(WWTP_ID2, technical_replicate, continent) %>% 
+  summarise(sum = sum(rel_abun_genus), 
+            ) %>% #arrange(sum)
+  group_by(WWTP_ID2, continent) %>% 
+  summarise(mean = mean(sum), y = "Summarised relative\nabundance [%]") %>% 
+  ggplot(aes(x = WWTP_ID2, fill = cut(
+                           mean,
+                           breaks = c(0, 0.01, 0.1, 1, 5, Inf),  # Define bins (upper bound inclusive)
+                           labels = c("0", "0.01", "0.1", "1", ">5"),
+                           include.lowest = TRUE
+                         ), 
+             y = y, label = round(mean, digits = 0))) + 
+  geom_tile(color = "black") + 
+  geom_text(size = 6) + 
+  scale_y_discrete(expand = c(0,0)) + 
+  scale_x_discrete(position = "bottom") +
+  scale_fill_manual(
+    values = c(
+      "0" = "white", 
+      "0.01" = "#FDEDEC", 
+      "0.1" = "#F5B7B1", 
+      "1" = "#D98880", 
+      ">5" = "#D98880" ##922B21"
+    ), 
+    breaks = c(
+      "0-0.01", 
+      "0.01-0.1", 
+      "0.1-1", 
+      "1-5", 
+      ">5" 
+    ), 
+    guide = "none",
+    na.value = "grey"
+  ) + 
+  theme_minimal() +
+  facet_grid(y~continent, scales = "free", space = "free", switch = "y") +
+  theme(
+    #axis.title = element_blank(), 
+    axis.text.x.top = element_text(size = 15, color = "black"), 
+    #axis.text.y = element_blank(), 
+    axis.ticks.y = element_blank(), 
+    strip.text.x.top = element_text(size = 15, color = "black"), 
+    axis.text.x = element_text(size = 15, color = "black"), 
+    axis.text.y = element_text(size = 15, color = "black"), 
+    strip.text.y.left = element_blank(), #element_text(angle =  0), 
+    axis.title = element_blank()
+  ) 
+
+
+plot_name = "Figure_6_partly"
+ggsave(paste0(OutputPath, "figures_main/",plot_name,".png"), width = 15.2, height = 1.5)
+ggsave(filename = paste0(OutputPath, "figures_main/", plot_name,".pdf"), 
+       limitsize = F,  useDingbats=FALSE, 
+       width = 15.2, height = 1.5)
+
+
+```
+
+### Summarised abundance for tree plot - phylum level HM (Not included in article)
+
+```{r}
+
+set.seed(123)
+top_20_per_WWTPID <- data_long %>%
+  filter(identy_cutoff %in% c(0.945)) %>%
+  select(-total_reads) %>%
+  filter(!SampleContent %in% c("CTRL", "PCRPOS", "PCRNEG")) %>%
+  filter(!str_detect(WWTP_ID2, "MiDAS")) %>%
+  group_by(WWTP_ID2) %>%
+  sample_n(2) %>%
+  unnest(samples) %>%
+  group_by(WWTP_ID2, Genus, Phylum) %>%
+  summarise(mean = mean(rel_abun_genus)) %>%
+  group_by(WWTP_ID2) %>%
+  slice_max(mean, n = 15) %>%
+  ungroup()
+
+g_distinct <- top_20_per_WWTPID %>% distinct(Genus)
+p_distinct <- top_20_per_WWTPID %>% distinct(Phylum)
+
+
+top_20_per_WWTPID %>% 
+  group_by(WWTP_ID2) %>% 
+  summarise(suym = sum(mean)) %>% 
+  arrange(suym)
+
+
+plot_df <- data_long %>% 
+  ungroup() %>% 
+  filter(identy_cutoff %in% c(0.82)) %>%
+  mutate(samples = map(.x = samples, ~group_by(.x, Phylum) %>% mutate(rel_abun_phylum = sum(rel_abun_ASV)) %>% ungroup())) %>% 
+  mutate(samples = 
+               map(.x = samples, ~
+                     ungroup(.) %>% 
+                     distinct(Phylum, rel_abun_phylum) %>% 
+                     filter(!str_detect(Phylum, "unclassified")) %>% 
+                     mutate(Phylum = if_else(Phylum %in% unlist(p_distinct), Phylum, "Remaining"))
+                   )) %>% 
+  unnest(samples) %>% 
+  group_by(WWTP_ID2, technical_replicate, continent, Phylum, WWTP_ID) %>% 
+  summarise(sum = sum(rel_abun_phylum), 
+            ) %>% #arrange(sum)
+  group_by(WWTP_ID2, continent, Phylum, WWTP_ID) %>% 
+  summarise(mean = mean(sum), y = "Summarised\nabundance") %>% 
+  mutate(Phylum = factor(str_remove(Phylum, "p__")), 
+         Phylum = fct_rev(Phylum), 
+         Phylum = fct_relevel(Phylum, "Remaining", after = 0))
+
+
+plot_df %>% 
+  ggplot(aes(x = WWTP_ID2, fill = cut(
+                           mean,
+                           breaks = c(0, 1, 5, 10, 20, Inf),  # Define bins (upper bound inclusive)
+                           labels = c("0", "1", "5", "10", ">20"),
+                           include.lowest = TRUE
+                         ), 
+             y = Phylum, label = round(mean, digits = 0))) + 
+  geom_tile(color = "black") + 
+  geom_text() + 
+  #scale_y_discrete(expand = c(0,0)) + 
+  scale_x_discrete(position = "bottom") +
+  scale_fill_manual(
+    values = c(
+      "0" = "white", 
+      "1" = "#FDEDEC", 
+      "5" = "#F5B7B1", 
+      "10" = "#D98880", 
+      ">20" = "#b35630"#922B01" ##922B21"
+    ), 
+    breaks = c(
+      "0-0.01", 
+      "0.01-0.1", 
+      "0.1-1", 
+      "1-5", 
+      ">5" 
+    ), 
+    guide = "none",
+    na.value = "grey"
+  ) + 
+  theme_minimal() +
+  facet_grid(~continent, scales = "free", space = "free"#, switch = "y"
+             ) +
+  theme(
+    axis.title = element_blank(), 
+    axis.text.x.top = element_text(size = 14), 
+    #axis.text.y = element_blank(), 
+    axis.ticks.y = element_blank(), 
+    strip.text.y.left = element_text(angle =  0)
+  ) 
+
+```
+
+
+---
+
