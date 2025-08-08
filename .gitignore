@@ -3,8 +3,11 @@
 .Rproj.user/
 
 # Data from the MiDAS database
-data\MIDAS_53_taxa.txt
+data/MIDAS_53_taxa.txt
 
 # Output
-output\figures_main\*.pdf
-output\figures_supplementary\*.pdf
+output/figures_main/*.pdf
+output/figures_supplementary/*.pdf
+
+# HTML
+scripts/20250807_rethink_global_survey_article_plots_cleaned.html
