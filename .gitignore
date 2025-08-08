@@ -1,0 +1,10 @@
+# RStudio project files
+*.Rproj
+.Rproj.user/
+
+# Data from the MiDAS database
+data\MIDAS_53_taxa.txt
+
+# Output
+output\figures_main\*.pdf
+output\figures_supplementary\*.pdf
